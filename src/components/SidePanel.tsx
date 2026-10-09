@@ -76,16 +76,22 @@ export default function SidePanel(p: Props) {
         <header className="px-5 pb-3 pt-4">
           <h2 className="text-lg font-extrabold tracking-tight">天河区 · 新盘配套评分</h2>
           <p className="mt-0.5 text-[11px] text-neutral-400">
-            在售新盘 {p.listings.length} 个 · 视野半径 ≈{p.currentKm >= 10 ? Math.round(p.currentKm) : p.currentKm.toFixed(1)} 公里 · 圆外淡化聚焦
+            在售新盘 {p.listings.length} 个 · 点击楼盘聚焦其 5 公里配套圈
           </p>
-          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2">
+          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
             <span className="text-neutral-400">⌕</span>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索楼盘、板块或地标"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && filtered.length > 0) p.onSelect(filtered[0].id)
+              }}
+              placeholder="搜索楼盘、板块或地标，回车直达"
               className="flex-1 text-xs outline-none"
             />
+            {q && (
+              <button className="text-neutral-300 hover:text-neutral-500" onClick={() => setQ('')}>✕</button>
+            )}
           </div>
           {/* 配套图层开关 */}
           <div className="mt-3">

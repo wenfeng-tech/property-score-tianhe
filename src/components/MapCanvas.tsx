@@ -157,19 +157,28 @@ export default function MapCanvas(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.presetKm])
 
-  // 选中楼盘：外框不变，仅平移让楼盘进入视野中心；取消选中：回到圆心（缩放不变）
+  // 选中楼盘：大视野（>8km）时自动缩放到楼盘周边 5km 默认视野；小视野仅平移
+  // 取消选中：飞回广州市政府圆心，恢复当前档位视野
+  const firstSel = useRef(true)
   useEffect(() => {
+    if (firstSel.current) { firstSel.current = false; return } // 跳过首次挂载
     const { listings, selectedId } = props
     const v = viewRef.current
     if (selectedId != null) {
       const l = listings.find((x) => x.id === selectedId)
       if (!l) return
-      const r = wrapRef.current!.getBoundingClientRect()
-      const x = X(l.lon, r.width), y = Y(l.lat, r.height)
-      // 已在视野中央 60% 区域内则不动，否则平移过去（缩放不变）
-      if (Math.abs(x - r.width / 2) > r.width * 0.3 || Math.abs(y - r.height / 2) > r.height * 0.3) {
-        flyView(l.lon, l.lat, v.scale)
-      } else draw()
+      const kmNow = kmForScale(v.scale)
+      if (kmNow > 8) {
+        flyView(l.lon, l.lat, scaleForKm(5)) // 50km 等大视野 → 默认 5km 配套视野
+      } else {
+        const r = wrapRef.current!.getBoundingClientRect()
+        const x = X(l.lon, r.width), y = Y(l.lat, r.height)
+        if (Math.abs(x - r.width / 2) > r.width * 0.3 || Math.abs(y - r.height / 2) > r.height * 0.3) {
+          flyView(l.lon, l.lat, v.scale)
+        } else draw()
+      }
+    } else {
+      flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(propsRef.current.presetKm))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedId])
@@ -769,9 +778,6 @@ export default function MapCanvas(props: Props) {
             </button>
           )
         })}
-        <div className="mt-0.5 text-center text-[10px] font-medium text-red-600">
-          ≈{activeKm >= 10 ? Math.round(activeKm) : activeKm.toFixed(1)}km
-        </div>
       </div>
     </div>
   )

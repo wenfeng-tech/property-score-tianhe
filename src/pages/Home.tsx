@@ -57,7 +57,7 @@ export default function Home() {
 
       {/* 主体：竖屏上下对半，横屏左右对半 */}
       <div className="flex min-h-0 flex-1 flex-col landscape:flex-row">
-        <aside className="h-1/2 w-full flex-shrink-0 overflow-hidden border-b border-neutral-200 landscape:h-full landscape:w-1/2 landscape:border-b-0 landscape:border-r">
+        <aside className="h-1/2 w-full flex-shrink-0 overflow-hidden border-b border-neutral-200 landscape:h-full landscape:w-[40%] landscape:border-b-0 landscape:border-r">
           {base && pois && listings ? (
             <SidePanel
               listings={listings}
