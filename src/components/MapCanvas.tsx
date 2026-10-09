@@ -3,12 +3,30 @@ import { GridIndex, GZ_GOV, haversine, fmtDist } from '../lib/geo'
 import { DIMS, DIM_COLORS, DIM_NAMES } from '../lib/scoring'
 import type { BaseFeature, Listing, POISet, ListingScore } from '../types'
 
-const BASE_COLORS: Record<string, string> = {
-  residential: '#f2a24a', commercial: '#e23b46', industrial: '#9aa7b4',
-  government: '#7d3fb0', education: '#f6c62b', healthcare: '#ef6aa8',
-  park: '#7cc24a', green: '#2f8f5c', water: '#8ec4e6',
-  transport: '#c9c9c9', tourism: '#c084e8',
+// ---------- 底图配色（来自 QML 样式文件） ----------
+const NATURAL_COLORS: Record<string, string> = {
+  海洋: 'rgb(100,150,220)', 水体: 'rgb(150,200,245)', 林地: 'rgb(140,200,140)',
+  灌木: 'rgb(180,220,160)', 草原: 'rgb(200,230,150)', 湿地: 'rgb(160,210,200)',
+  沙地: 'rgb(240,230,190)', 草地: 'rgb(190,235,170)', 沙滩: 'rgb(245,240,200)',
 }
+// 道路：颜色按 QML，宽度为实际米数（随缩放换算像素）
+const ROAD_STYLES: Record<string, { c: string; m: number; min: number; gate: number }> = {
+  motorway:       { c: 'rgb(220,60,60)',   m: 36, min: 1.8, gate: 0 },
+  trunk:          { c: 'rgb(240,130,40)',  m: 28, min: 1.6, gate: 0 },
+  primary:        { c: 'rgb(250,200,60)',  m: 23, min: 1.4, gate: 0 },
+  secondary:      { c: 'rgb(255,235,150)', m: 17, min: 1.2, gate: 12 },
+  tertiary:       { c: 'rgb(180,180,180)', m: 12, min: 1.0, gate: 25 },
+  motorway_link:  { c: 'rgb(230,120,120)', m: 14, min: 0.8, gate: 45 },
+  trunk_link:     { c: 'rgb(245,170,80)',  m: 12, min: 0.8, gate: 45 },
+  primary_link:   { c: 'rgb(252,220,120)', m: 11, min: 0.7, gate: 45 },
+  secondary_link: { c: 'rgb(255,240,180)', m: 10, min: 0.7, gate: 45 },
+  tertiary_link:  { c: 'rgb(180,180,180)', m: 9,  min: 0.6, gate: 45 },
+}
+const ROAD_DRAW_ORDER = [
+  'tertiary_link', 'secondary_link', 'primary_link', 'trunk_link', 'motorway_link',
+  'tertiary', 'secondary', 'primary', 'trunk', 'motorway',
+]
+
 // 楼盘评分冷色系渐变：低分浅青 → 高分深蓝
 function scoreCool(s: number): [number, number, number] {
   const t = Math.max(0, Math.min(1, (s - 40) / 55))
@@ -20,8 +38,9 @@ function scoreCool(s: number): [number, number, number] {
   ]
 }
 const scoreCoolCss = (s: number) => { const [r, g, b] = scoreCool(s); return `rgb(${r},${g},${b})` }
-const RADIUS_STEPS = [5, 15, 35, 50]
-const MAX_KM = 50 // 最大边界：缩放/平移都不可越过 50km 范围
+
+const MAX_KM = 50      // 最大边界：缩放/平移都不可越过相当于 50km 半径的视野
+const HOME_KM = 35     // 默认/回圆心视野：35km
 
 interface Props {
   base: BaseFeature[]
@@ -29,14 +48,10 @@ interface Props {
   pois: POISet | null
   selectedId: number | null
   hoverId: number | null
-  presetKm: number          // 点选的目标档位
-  currentKm: number
   dimVis: Record<string, boolean>
   scores: Map<number, ListingScore> | null
   onSelect: (id: number | null) => void
   onHover: (id: number | null) => void
-  onPreset: (km: number) => void
-  onKmChange: (km: number) => void
 }
 
 interface View { cx: number; cy: number; scale: number }
@@ -46,7 +61,7 @@ function geomCentroid(g: { type: string; coordinates: any }): [number, number] |
   if (!ring) return null
   let a = 0, x = 0, y = 0
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const cr = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]
+    const cr = ring[j][0] * ring[i][1] - ring[j][1] * ring[i][0]
     a += cr; x += (ring[j][0] + ring[i][0]) * cr; y += (ring[j][1] + ring[i][1]) * cr
   }
   a *= 3
@@ -60,7 +75,6 @@ export default function MapCanvas(props: Props) {
   const viewRef = useRef<View>({ cx: GZ_GOV.lon, cy: GZ_GOV.lat, scale: 0 })
   const propsRef = useRef(props)
   propsRef.current = props
-  const lastKmRef = useRef(0)
 
   const grid = useMemo(() => new GridIndex(props.base, (b) => b.g), [props.base])
   const gridRef = useRef(grid)
@@ -95,26 +109,18 @@ export default function MapCanvas(props: Props) {
   const nearPoisRef = useRef(nearPois)
   nearPoisRef.current = nearPois
 
-  // ---------- 圆：屏幕固定 ----------
-  const circlePx = () => {
+  // ---------- 视野与缩放（虚拟半径公里数 ⇄ 比例尺） ----------
+  const virtualR = () => {
     const r = wrapRef.current!.getBoundingClientRect()
-    return { x: r.width / 2, y: r.height / 2, R: Math.min(r.width, r.height) * 0.4 }
+    return Math.min(r.width, r.height) * 0.4
   }
-  const scaleForKm = (km: number) => {
-    const { R } = circlePx()
-    return (R * 111320) / (km * 1000)
-  }
-  const kmForScale = (scale: number) => {
-    const { R } = circlePx()
-    return (R * 111320) / (scale * 1000)
-  }
+  const scaleForKm = (km: number) => (virtualR() * 111320) / (km * 1000)
+  const kmForScale = (scale: number) => (virtualR() * 111320) / (scale * 1000)
   const minScale = () => scaleForKm(MAX_KM)
   const maxScale = () => scaleForKm(0.8)
 
   function clampView(v: View) {
-    // 缩放限制：最大到 50km 框
     v.scale = Math.max(minScale(), Math.min(maxScale(), v.scale))
-    // 平移限制：视图中心不可滑出 50km 边界（留 8km 余量保证圆内有内容）
     const d = haversine(v.cx, v.cy, GZ_GOV.lon, GZ_GOV.lat)
     const maxD = (MAX_KM - 8) * 1000
     if (d > maxD) {
@@ -124,22 +130,13 @@ export default function MapCanvas(props: Props) {
     }
   }
 
-  function reportKm() {
-    const km = kmForScale(viewRef.current.scale)
-    if (Math.abs(km - lastKmRef.current) / lastKmRef.current > 0.01 || Math.abs(km - lastKmRef.current) > 0.2) {
-      lastKmRef.current = km
-      propsRef.current.onKmChange(km)
-    }
-  }
-
   function fitView() {
     const v = viewRef.current
     v.cx = GZ_GOV.lon
     v.cy = GZ_GOV.lat
-    v.scale = scaleForKm(propsRef.current.presetKm)
+    v.scale = scaleForKm(HOME_KM)
     clampView(v)
     draw()
-    reportKm()
   }
 
   useEffect(() => {
@@ -148,28 +145,18 @@ export default function MapCanvas(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 档位点选 → 缩放地图让固定圆对应该公里数
-  const firstPreset = useRef(true)
-  useEffect(() => {
-    if (firstPreset.current) { firstPreset.current = false; return }
-    const v = viewRef.current
-    flyView(v.cx, v.cy, scaleForKm(props.presetKm))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.presetKm])
-
-  // 选中楼盘：大视野（>8km）时自动缩放到楼盘周边 5km 默认视野；小视野仅平移
-  // 取消选中：飞回广州市政府圆心，恢复当前档位视野
+  // 选中楼盘：大视野（>8km）时自动飞到楼盘 5km 视野；小视野仅按需平移
+  // 取消选中：飞回广州市政府圆心 35km 默认视野
   const firstSel = useRef(true)
   useEffect(() => {
-    if (firstSel.current) { firstSel.current = false; return } // 跳过首次挂载
+    if (firstSel.current) { firstSel.current = false; return }
     const { listings, selectedId } = props
     const v = viewRef.current
     if (selectedId != null) {
       const l = listings.find((x) => x.id === selectedId)
       if (!l) return
-      const kmNow = kmForScale(v.scale)
-      if (kmNow > 8) {
-        flyView(l.lon, l.lat, scaleForKm(5)) // 50km 等大视野 → 默认 5km 配套视野
+      if (kmForScale(v.scale) > 8) {
+        flyView(l.lon, l.lat, scaleForKm(5))
       } else {
         const r = wrapRef.current!.getBoundingClientRect()
         const x = X(l.lon, r.width), y = Y(l.lat, r.height)
@@ -178,7 +165,7 @@ export default function MapCanvas(props: Props) {
         } else draw()
       }
     } else {
-      flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(propsRef.current.presetKm))
+      flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(HOME_KM))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedId])
@@ -198,7 +185,6 @@ export default function MapCanvas(props: Props) {
       clampView(v)
       draw()
       if (k < 1) animRef.current = requestAnimationFrame(step)
-      else reportKm()
     }
     animRef.current = requestAnimationFrame(step)
   }
@@ -223,7 +209,7 @@ export default function MapCanvas(props: Props) {
     const ctx = cv.getContext('2d')!
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, r.width, r.height)
-    ctx.fillStyle = '#f6f6f4'
+    ctx.fillStyle = '#f2f0eb'
     ctx.fillRect(0, 0, r.width, r.height)
     const v = viewRef.current
     if (v.scale === 0) return
@@ -267,33 +253,31 @@ export default function MapCanvas(props: Props) {
       ctx.globalAlpha = 1
     }
 
-    // 1. 用地色块
-    const areas = inView.filter((f) => f.g.type !== 'LineString' && f.g.type !== 'MultiLineString')
-    areas.sort((a, b) => (a.c === 'water' ? -1 : b.c === 'water' ? 1 : 0))
-    for (const f of areas) {
-      if (f.c === 'boundary') continue
+    // 1. 自然地物（水体/林地/草地…，QML 配色）
+    for (const f of inView) {
+      const col = NATURAL_COLORS[f.c]
+      if (!col) continue
+      if (f.g.type !== 'Polygon' && f.g.type !== 'MultiPolygon') continue
       pathGeom(f.g)
-      ctx.fillStyle = BASE_COLORS[f.c] || '#eaeae8'
-      // 水体 / 绿地山体更醒目，其余色块保持淡雅
-      ctx.globalAlpha = f.c === 'water' || f.c === 'green' || f.c === 'park' ? 0.95 : 0.7
+      ctx.fillStyle = col
+      ctx.globalAlpha = 0.9
       ctx.fill()
       ctx.globalAlpha = 1
+      ctx.strokeStyle = 'rgba(120,120,120,0.35)'
+      ctx.lineWidth = 0.5
+      ctx.stroke()
     }
-    // 2. 骨架线网：水系 → 主干道 → 小区道路（高倍率）→ 铁路 → 地铁（深色骨架）
-    for (const f of inView) {
-      if (f.g.type !== 'LineString' && f.g.type !== 'MultiLineString') continue
-      if (f.c === 'water' || f.c === 'water_line') strokeLines(f, '#4f9fd8', Math.max(1.6, pxPerKm * 0.14), 1)
-    }
-    for (const f of inView) {
-      if (f.c !== 'road_major') continue
-      strokeLines(f, '#ffffff', Math.max(2, pxPerKm * 0.18), 0.85)
-      strokeLines(f, '#636363', Math.max(1.1, pxPerKm * 0.09), 0.95)
-    }
-    if (pxPerKm > 55)
+    // 2. 道路（QML 暖色分级，先低级后高级，主干压上面；按缩放逐级显示）
+    for (const cls of ROAD_DRAW_ORDER) {
+      const st = ROAD_STYLES[cls]
+      if (pxPerKm < st.gate) continue
+      const w = Math.max(st.min, ((st.m / 1000) * pxPerKm))
       for (const f of inView) {
-        if (f.c !== 'road_minor') continue
-        strokeLines(f, '#9d9d9d', 0.8, 0.8)
+        if (f.c !== cls) continue
+        strokeLines(f, st.c, w, 0.95)
       }
+    }
+    // 3. 铁路 / 地铁（深色压顶）
     for (const f of inView) {
       if (f.c !== 'rail') continue
       strokeLines(f, '#6f6f6f', 1.2, 0.85, [6, 4])
@@ -303,7 +287,7 @@ export default function MapCanvas(props: Props) {
       strokeLines(f, '#ffffff', Math.max(2.2, pxPerKm * 0.2), 0.9)
       strokeLines(f, '#3f3f3f', Math.max(1.1, pxPerKm * 0.09), 0.95)
     }
-    // 3. 区界（弱化）
+    // 4. 区界（弱化）
     for (const f of inView) {
       if (f.c !== 'boundary') continue
       pathGeom(f.g)
@@ -314,7 +298,7 @@ export default function MapCanvas(props: Props) {
       ctx.setLineDash([])
     }
 
-    // 4. 区名（远景）+ 地铁站名（近景），都压在淡化层下
+    // 5. 区名（远景）+ 地铁站名（近景）
     if (pxPerKm < 55) {
       ctx.textAlign = 'center'
       for (const d of districtLabels) {
@@ -358,43 +342,7 @@ export default function MapCanvas(props: Props) {
       }
     }
 
-    // 5. 范围圈（屏幕固定，单个，无副圈）：圆外淡化 + 主虚线框
-    const { x: ccx, y: ccy, R: Rp } = circlePx()
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(0, 0, r.width, r.height)
-    ctx.arc(ccx, ccy, Rp, 0, Math.PI * 2, true)
-    ctx.fillStyle = 'rgba(255,255,255,0.74)'
-    ctx.fill('evenodd')
-    const grad = ctx.createRadialGradient(ccx, ccy, Math.max(0, Rp - 60), ccx, ccy, Rp + 40)
-    grad.addColorStop(0, 'rgba(255,255,255,0)')
-    grad.addColorStop(1, 'rgba(255,255,255,0.55)')
-    ctx.beginPath()
-    ctx.rect(0, 0, r.width, r.height)
-    ctx.arc(ccx, ccy, Rp, 0, Math.PI * 2, true)
-    ctx.fillStyle = grad
-    ctx.fill('evenodd')
-    ctx.restore()
-    ctx.beginPath()
-    ctx.arc(ccx, ccy, Rp, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(226,59,70,0.85)' // 设计图同款红色虚线框
-    ctx.lineWidth = 1.8
-    ctx.setLineDash([8, 6])
-    ctx.stroke()
-    ctx.setLineDash([])
-    // 半径标注（实时公里数）
-    const kmNow = kmForScale(v.scale)
-    ctx.font = '600 12px -apple-system, "PingFang SC", sans-serif'
-    ctx.textAlign = 'left'
-    const label = `${kmNow >= 10 ? Math.round(kmNow) : kmNow.toFixed(1)}km 范围圈`
-    const ltw = ctx.measureText(label).width
-    const lx = ccx + Rp * Math.SQRT1_2 + 4, ly = ccy - Rp * Math.SQRT1_2 - 6
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
-    ctx.fillRect(lx - 4, ly - 13, ltw + 8, 17)
-    ctx.fillStyle = '#c1121f'
-    ctx.fillText(label, lx, ly)
-
-    // 6. 广州市政府（地理圆心）
+    // 6. 广州市政府（地理中心）
     {
       const gx = X(GZ_GOV.lon, r.width), gy = Y(GZ_GOV.lat, r.height)
       if (gx > -60 && gx < r.width + 60 && gy > -20 && gy < r.height + 20) {
@@ -405,6 +353,7 @@ export default function MapCanvas(props: Props) {
         ctx.strokeStyle = '#fff'
         ctx.lineWidth = 2
         ctx.stroke()
+        ctx.textAlign = 'left'
         ctx.font = 'bold 13px -apple-system, "PingFang SC", sans-serif'
         const gw = ctx.measureText(GZ_GOV.name).width
         ctx.fillStyle = 'rgba(255,255,255,0.88)'
@@ -414,38 +363,9 @@ export default function MapCanvas(props: Props) {
       }
     }
 
-    // 7. 选中楼盘：1/3/5km 渐变圈层（外框不动）
+    // 7. 选中楼盘：周边配套撒点（无圈层）
     const sel = p.selectedId != null ? p.listings.find((x) => x.id === p.selectedId) : null
     if (sel) {
-      const sx = X(sel.lon, r.width), sy = Y(sel.lat, r.height)
-      // 渐变底盘
-      const rg = ctx.createRadialGradient(sx, sy, 0, sx, sy, km2px(5))
-      rg.addColorStop(0, 'rgba(230,57,70,0.14)')
-      rg.addColorStop(0.4, 'rgba(230,57,70,0.07)')
-      rg.addColorStop(1, 'rgba(230,57,70,0)')
-      ctx.beginPath()
-      ctx.arc(sx, sy, km2px(5), 0, Math.PI * 2)
-      ctx.fillStyle = rg
-      ctx.fill()
-      // 三道圈层，由近及远渐淡
-      const rings: { km: number; alpha: number; dash: number[] }[] = [
-        { km: 1, alpha: 0.95, dash: [] },
-        { km: 3, alpha: 0.55, dash: [6, 5] },
-        { km: 5, alpha: 0.3, dash: [3, 6] },
-      ]
-      for (const g of rings) {
-        ctx.beginPath()
-        ctx.arc(sx, sy, km2px(g.km), 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(230,57,70,${g.alpha})`
-        ctx.lineWidth = g.km === 1 ? 1.8 : 1.4
-        ctx.setLineDash(g.dash)
-        ctx.stroke()
-        ctx.setLineDash([])
-        ctx.font = '600 11px -apple-system, "PingFang SC", sans-serif'
-        ctx.fillStyle = `rgba(200,30,45,${Math.min(1, g.alpha + 0.25)})`
-        ctx.fillText(`${g.km}km`, sx + km2px(g.km) * Math.SQRT1_2 + 3, sy - km2px(g.km) * Math.SQRT1_2 - 3)
-      }
-      // 附近 POI 撒点
       for (const q of nearPoisRef.current) {
         const dimKey = DIMS.find((d) => d.cats.includes(q.cat as any))?.key
         if (dimKey && p.dimVis[dimKey] === false) continue
@@ -460,7 +380,7 @@ export default function MapCanvas(props: Props) {
       }
     }
 
-    // 8. 楼盘点位（评分冷色系渐变，圈外同步淡化）+ 名称标签
+    // 8. 楼盘点位（评分冷色系渐变）+ 名称标签
     const labelGrid: Record<string, boolean> = {}
     const showNames = pxPerKm > 12
     const sorted = [...p.listings].sort(
@@ -472,11 +392,7 @@ export default function MapCanvas(props: Props) {
       const isSel = l.id === p.selectedId
       const isHov = l.id === p.hoverId
       const col = scoreCoolCss(p.scores?.get(l.id)?.total ?? 50)
-      // 圈外楼盘淡化（选中楼盘始终清晰）
-      const outside = Math.hypot(x - ccx, y - ccy) > Rp
-      const dimAlpha = isSel ? 1 : outside ? 0.18 : 1
       const rad = isSel ? 9 : isHov ? 8 : 6.5
-      ctx.globalAlpha = dimAlpha
       if (isSel) {
         ctx.beginPath()
         ctx.arc(x, y, 13, 0, Math.PI * 2)
@@ -484,7 +400,6 @@ export default function MapCanvas(props: Props) {
         ctx.lineWidth = 5
         ctx.stroke()
       }
-      // 径向渐变光点球
       const dg = ctx.createRadialGradient(x - rad * 0.35, y - rad * 0.35, rad * 0.1, x, y, rad)
       dg.addColorStop(0, 'rgba(255,255,255,0.95)')
       dg.addColorStop(0.45, col)
@@ -496,7 +411,7 @@ export default function MapCanvas(props: Props) {
       ctx.strokeStyle = isSel ? '#1d4ed8' : '#fff'
       ctx.lineWidth = isSel ? 2.2 : 1.8
       ctx.stroke()
-      if (!isSel && !isHov && !showNames) { ctx.globalAlpha = 1; continue }
+      if (!isSel && !isHov && !showNames) continue
       const nm = l.name.length > 12 ? l.name.slice(0, 12) + '…' : l.name
       const fs = isSel || isHov ? 12 : 10.5
       ctx.font = `${isSel ? 'bold ' : ''}${fs}px -apple-system, "PingFang SC", sans-serif`
@@ -515,7 +430,6 @@ export default function MapCanvas(props: Props) {
         ctx.fillStyle = isSel ? '#fff' : '#222'
         ctx.fillText(nm, bx + 1, by + fs - 1)
       }
-      ctx.globalAlpha = 1
     }
 
     // 9. 比例尺 / 指北针
@@ -598,9 +512,7 @@ export default function MapCanvas(props: Props) {
           v.cx = lon0 - (mx - r.width / 2) / (cosLat() * v.scale)
           v.cy = lat0 + (my - r.height / 2) / v.scale
           clampView(v)
-          moved = true
           draw()
-          reportKm()
         }
         return
       }
@@ -664,7 +576,6 @@ export default function MapCanvas(props: Props) {
       v.cy = lat0 + (my - r.height / 2) / v.scale
       clampView(v) // 50km 为最大边界
       draw()
-      reportKm()
     }
     function dblclick(e: MouseEvent) {
       const r = rect()
@@ -675,7 +586,6 @@ export default function MapCanvas(props: Props) {
       v.cy = lat0 + (my - r.height / 2) / v.scale
       clampView(v)
       draw()
-      reportKm()
     }
 
     cv.addEventListener('pointerdown', down)
@@ -687,7 +597,7 @@ export default function MapCanvas(props: Props) {
     cv.addEventListener('pointerleave', () => { tipRef.current!.style.display = 'none' })
     const ro = new ResizeObserver(() => {
       if (viewRef.current.scale === 0) fitView()
-      else { clampView(viewRef.current); draw(); reportKm() }
+      else { clampView(viewRef.current); draw() }
     })
     ro.observe(el)
     return () => {
@@ -707,20 +617,19 @@ export default function MapCanvas(props: Props) {
     flyView(v.cx, v.cy, v.scale * f)
   }
 
-  const activeKm = Math.abs(props.currentKm) || 15
   const avgScore = props.scores
     ? Math.round([...props.scores.values()].reduce((s, x) => s + x.total, 0) / props.scores.size)
     : 0
 
   return (
-    <div ref={wrapRef} className="absolute inset-0 bg-[#f6f6f4]">
+    <div ref={wrapRef} className="absolute inset-0 bg-[#f2f0eb]">
       <canvas ref={cvRef} className="h-full w-full touch-none" style={{ cursor: 'grab' }} />
       <div
         ref={tipRef}
         className="pointer-events-none absolute z-10 hidden rounded-md border border-neutral-300 bg-white/95 px-2.5 py-1.5 text-xs leading-relaxed shadow-md"
         style={{ maxWidth: 220 }}
       />
-      {/* 图例（右上，设计图版式） */}
+      {/* 图例（右上，缩放控件旁） */}
       <div className="absolute right-14 top-3 rounded-lg border border-neutral-200 bg-white/92 px-3 py-2 text-[11px] shadow-sm backdrop-blur">
         <div className="mb-1 font-semibold text-neutral-700">图例</div>
         <div className="flex items-center gap-1.5 py-0.5 text-neutral-600">
@@ -744,7 +653,7 @@ export default function MapCanvas(props: Props) {
         <span className="mx-1.5 text-neutral-300">|</span>
         <span className="text-neutral-500">平均综合分 <b className="text-blue-700">{avgScore}</b></span>
       </div>
-      {/* 右侧控制：缩放 + 回圆心 + 半径档位（与缩放联动高亮） */}
+      {/* 右侧控制：缩放 + 回圆心（默认 35km 视野） */}
       <div className="absolute right-3 top-3 flex flex-col items-stretch gap-1">
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-lg shadow-sm hover:bg-neutral-50"
@@ -756,28 +665,9 @@ export default function MapCanvas(props: Props) {
         >−</button>
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-xs shadow-sm hover:bg-neutral-50"
-          title="回到广州市政府圆心"
-          onClick={() => { propsRef.current.onSelect(null); flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(propsRef.current.presetKm)) }}
+          title="回到广州市政府 · 35km 视野"
+          onClick={() => { propsRef.current.onSelect(null); flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(HOME_KM)) }}
         >⌖</button>
-        <div className="mt-1 border-t border-neutral-200 pt-1 text-center text-[10px] text-neutral-400">
-          半径
-        </div>
-        {RADIUS_STEPS.map((km) => {
-          const active = Math.abs(activeKm - km) / km < 0.07
-          return (
-            <button
-              key={km}
-              onClick={() => props.onPreset(km)}
-              className={`rounded border px-1 py-0.5 text-[11px] shadow-sm ${
-                active
-                  ? 'border-red-600 bg-red-600 font-bold text-white'
-                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              {km}
-            </button>
-          )
-        })}
       </div>
     </div>
   )
