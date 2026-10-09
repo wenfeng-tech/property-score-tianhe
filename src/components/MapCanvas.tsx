@@ -230,7 +230,7 @@ export default function MapCanvas(props: Props) {
     const applyMinZoom = () => map.setMinZoom(zoomForKm(MAX_KM) - 0.02)
     // 平移钳制：圆心可活动范围 = 50km − 当前窄边可视半径，视野永远罩在 50km 内
     let clamping = false
-    const clampCenter = () => {
+    const doClamp = () => {
       if (clamping) return // setCenter 会再次触发 move，防递归
       const c = map.getCenter()
       const halfKm = (metersPerPx(map.getZoom()) * minDim()) / 2 / 1000
@@ -245,7 +245,10 @@ export default function MapCanvas(props: Props) {
         clamping = false
       }
     }
-    map.on('move', clampCenter)
+    // 用户拖拽：实时钳制；程序化动画（fitBounds/easeTo）：动画期间不干预，结束后再校正，
+    // 否则从全图视野点选楼盘时（allowed=0）圆心会被钉死在原地、动画被钳爆
+    map.on('move', (e: any) => { if (e?.originalEvent || !map.isMoving()) doClamp() })
+    map.on('moveend', doClamp)
 
     map.on('load', () => {
       applyMinZoom()
