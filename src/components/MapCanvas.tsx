@@ -88,6 +88,9 @@ export default function MapCanvas(props: Props) {
     ensureProtocol()
     const el = wrapRef.current!
     const pmtilesUrl = 'pmtiles://' + new URL('data/guangzhou_basemap.pmtiles', window.location.href).href
+    // 注意：maplibre 会把 tiles[] 的相对路径按 JS 包所在目录（assets/）解析，
+    // 必须基于页面 URL 预先转成绝对地址；且 {z} 占位符不能走 URL 构造器（花括号会被百分号编码）
+    const loTilesUrl = new URL('.', window.location.href).href + 'tiles/{z}/{x}/{y}.pbf'
 
     const naturalColor: any = ['match', ['get', 'category']]
     for (const [k, v] of NATURAL_COLORS) naturalColor.push(k, v)
@@ -101,7 +104,7 @@ export default function MapCanvas(props: Props) {
         // z6–z9：本地 geojson-vt 切好的目录瓦片（同一份 GPKG 全量数据）
         lobase: {
           type: 'vector',
-          tiles: ['./tiles/{z}/{x}/{y}.pbf'],
+          tiles: [loTilesUrl],
           minzoom: 6,
           maxzoom: 9,
         },

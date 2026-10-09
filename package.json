@@ -72,6 +72,7 @@
     "geojson-vt": "^3.2.1",
     "globals": "^16.5.0",
     "kimi-plugin-inspect-react": "^1.0.3",
+    "playwright-core": "^1.64.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7",
