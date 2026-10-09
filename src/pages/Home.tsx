@@ -1,32 +1,35 @@
 import { useEffect, useMemo, useState } from 'react'
 import MapCanvas from '../components/MapCanvas'
 import SidePanel from '../components/SidePanel'
-import { scoreAll, DIMS } from '../lib/scoring'
+import { scoreAll } from '../lib/scoring'
 import type { BaseFeature, Listing, POISet, ListingScore } from '../types'
+
+const FAC_DEFAULT: Record<string, boolean> = { school: true, mall: true, hospital: true, office: true }
 
 export default function Home() {
   const [base, setBase] = useState<BaseFeature[] | null>(null)
   const [pois, setPois] = useState<POISet | null>(null)
   const [listings, setListings] = useState<Listing[] | null>(null)
+  const [facilities, setFacilities] = useState<BaseFeature[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [hoverId, setHoverId] = useState<number | null>(null)
   const [showAbout, setShowAbout] = useState(false)
-  const [dimVis, setDimVis] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(DIMS.map((d) => [d.key, true])),
-  )
+  const [facVis, setFacVis] = useState<Record<string, boolean>>(FAC_DEFAULT)
 
   useEffect(() => {
     Promise.all([
       fetch('./data/base_landuse.json').then((r) => r.json()),
       fetch('./data/pois.json').then((r) => r.json()),
       fetch('./data/listings.json').then((r) => r.json()),
+      fetch('./data/facilities.json').then((r) => r.json()),
     ])
-      .then(([b, p, l]) => {
+      .then(([b, p, l, f]) => {
         setBase(b)
         setPois(p)
         setListings(l)
+        setFacilities(f)
       })
       .catch((e) => setErr(String(e)))
   }, [])
@@ -38,22 +41,22 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
-      {/* 顶部导航栏（设计图版式） */}
-      <nav className="flex h-[52px] flex-shrink-0 items-center justify-between border-b border-neutral-200 px-5 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[17px] font-black tracking-tight text-neutral-900">PropertyScore</span>
+      {/* 顶部导航栏（设计图版式，加宽） */}
+      <nav className="flex h-16 flex-shrink-0 items-center justify-between border-b border-neutral-200 px-6">
+        <button className="flex items-baseline gap-2.5" onClick={() => setSelectedId(null)}>
+          <span className="text-xl font-black tracking-tight text-neutral-900">PropertyScore</span>
           <span className="hidden text-xs text-neutral-400 sm:inline">广州天河 · 在售新盘配套评分</span>
-        </div>
-        <div className="flex items-center gap-4 text-xs text-neutral-500">
-          <button className="hover:text-neutral-900" onClick={() => setSelectedId(null)}>总览</button>
-          <button className="hover:text-neutral-900" onClick={() => setShowAbout(true)}>评分说明</button>
-          <span className="rounded-md bg-blue-600 px-3 py-1.5 font-medium text-white">
+        </button>
+        <div className="flex items-center gap-6 text-[13px] text-neutral-500">
+          <button className="font-medium hover:text-neutral-900" onClick={() => setSelectedId(null)}>总览</button>
+          <button className="font-medium hover:text-neutral-900" onClick={() => setShowAbout(true)}>评分说明</button>
+          <span className="rounded-md bg-blue-600 px-4 py-1.5 text-[13px] font-medium text-white shadow-sm">
             在售 {listings?.length ?? '…'} 盘
           </span>
         </div>
       </nav>
 
-      {/* 主体：竖屏上下对半，横屏左右对半 */}
+      {/* 主体：竖屏上下对半，横屏左 40% 右 60% */}
       <div className="flex min-h-0 flex-1 flex-col landscape:flex-row">
         <aside className="h-1/2 w-full flex-shrink-0 overflow-hidden border-b border-neutral-200 landscape:h-full landscape:w-[40%] landscape:border-b-0 landscape:border-r">
           {base && pois && listings ? (
@@ -62,10 +65,8 @@ export default function Home() {
               scores={scores}
               selectedId={selectedId}
               hoverId={hoverId}
-              dimVis={dimVis}
               onSelect={setSelectedId}
               onHover={setHoverId}
-              onToggleDim={(k) => setDimVis((s) => ({ ...s, [k]: s[k] === false }))}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-neutral-400">
@@ -74,17 +75,19 @@ export default function Home() {
           )}
         </aside>
         <main className="relative min-h-0 flex-1">
-          {base && pois && listings && (
+          {base && pois && listings && facilities && (
             <MapCanvas
               base={base}
               listings={listings}
               pois={pois}
+              facilities={facilities}
               selectedId={selectedId}
               hoverId={hoverId}
-              dimVis={dimVis}
+              facVis={facVis}
               scores={scores}
               onSelect={setSelectedId}
               onHover={setHoverId}
+              onToggleFac={(k) => setFacVis((s) => ({ ...s, [k]: s[k] === false }))}
             />
           )}
         </main>
@@ -103,8 +106,8 @@ export default function Home() {
               0–100 分：基础教育（30%）、轨道交通（25%）、商业购物（20%）、医疗配套（15%）、公园绿地（10%）。
             </p>
             <p className="mt-2">
-              默认视野为广州市政府周边 35 公里，最大范围 50 公里；选中楼盘后自动聚焦其周边 5 公里，
-              并在地图上显示该盘附近的配套资源点位。
+              默认视野为广州市政府周边 35 公里，最大范围 50 公里；选中楼盘后自动聚焦其周边 3 公里。
+              地图右侧面板可开关中小学、商场、医院、办公楼四类配套多边形图层（覆盖越秀/天河/海珠/荔湾）。
             </p>
             <p className="mt-2 text-neutral-400">
               地理数据来自 OpenStreetMap，楼盘信息来自公开在售信息；评分为空间统计结果，仅供参考，不构成置业建议。

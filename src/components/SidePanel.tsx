@@ -9,10 +9,8 @@ interface Props {
   scores: Map<number, ListingScore> | null
   selectedId: number | null
   hoverId: number | null
-  dimVis: Record<string, boolean>
   onSelect: (id: number | null) => void
   onHover: (id: number | null) => void
-  onToggleDim: (key: string) => void
 }
 
 // 楼盘缩略图（加载失败时退化为冷色渐变块+首字）
@@ -42,6 +40,7 @@ function Thumb({ l }: { l: Listing }) {
 export default function SidePanel(p: Props) {
   const [q, setQ] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('全部')
+  const [sortKey, setSortKey] = useState<string>('total')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -52,8 +51,14 @@ export default function SidePanel(p: Props) {
     let arr = p.listings
     if (typeFilter !== '全部') arr = arr.filter((l) => l.type === typeFilter)
     if (q.trim()) arr = arr.filter((l) => l.name.includes(q.trim()) || l.area.includes(q.trim()))
-    return [...arr].sort((a, b) => (p.scores?.get(b.id)?.total ?? 0) - (p.scores?.get(a.id)?.total ?? 0))
-  }, [p.listings, p.scores, q, typeFilter])
+    const val = (id: number) => {
+      const sc = p.scores?.get(id)
+      if (!sc) return 0
+      if (sortKey === 'total') return sc.total
+      return sc.dims.find((d) => d.key === sortKey)?.score ?? 0
+    }
+    return [...arr].sort((a, b) => val(b.id) - val(a.id))
+  }, [p.listings, p.scores, q, typeFilter, sortKey])
 
   const sel = p.selectedId != null ? p.listings.find((l) => l.id === p.selectedId) : null
   const selScore = sel ? p.scores?.get(sel.id) : null
@@ -71,57 +76,30 @@ export default function SidePanel(p: Props) {
   return (
     <div className="flex h-full flex-col bg-white">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {/* 标题 + 搜索（设计图版式） */}
-        <header className="px-5 pb-3 pt-4">
-          <h2 className="text-lg font-extrabold tracking-tight">天河区 · 新盘配套评分</h2>
-          <p className="mt-0.5 text-[11px] text-neutral-400">
-            在售新盘 {p.listings.length} 个 · 点击楼盘聚焦周边配套
-          </p>
-          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
-            <span className="text-neutral-400">⌕</span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && filtered.length > 0) p.onSelect(filtered[0].id)
-              }}
-              placeholder="搜索楼盘、板块或地标，回车直达"
-              className="flex-1 text-xs outline-none"
-            />
-            {q && (
-              <button className="text-neutral-300 hover:text-neutral-500" onClick={() => setQ('')}>✕</button>
-            )}
-          </div>
-          {/* 配套图层开关 */}
-          <div className="mt-3">
-            <div className="mb-1 text-[11px] font-semibold text-neutral-500">配套图层</div>
-            <div className="grid grid-cols-2 gap-x-3">
-              {DIMS.map((d) => {
-                const on = p.dimVis[d.key] !== false
-                return (
-                  <button
-                    key={d.key}
-                    onClick={() => p.onToggleDim(d.key)}
-                    className="flex items-center justify-between py-1.5 text-xs text-neutral-700"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block h-2 w-2 rounded-full" style={{ background: d.color }} />
-                      {d.label}
-                    </span>
-                    <span
-                      className={`relative inline-block h-4 w-7 rounded-full transition-colors ${on ? 'bg-blue-600' : 'bg-neutral-300'}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${on ? 'left-3.5' : 'left-0.5'}`}
-                      />
-                    </span>
-                  </button>
-                )
-              })}
+        {/* 总览头部：标题 + 搜索（选中楼盘后隐藏） */}
+        {!sel && (
+          <header className="px-5 pb-3 pt-4">
+            <h2 className="text-lg font-extrabold tracking-tight">天河区 · 新盘配套评分</h2>
+            <p className="mt-0.5 text-[11px] text-neutral-400">
+              在售新盘 {p.listings.length} 个 · 点击楼盘聚焦周边配套
+            </p>
+            <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
+              <span className="text-neutral-400">⌕</span>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filtered.length > 0) p.onSelect(filtered[0].id)
+                }}
+                placeholder="搜索楼盘、板块或地标，回车直达"
+                className="flex-1 text-xs outline-none"
+              />
+              {q && (
+                <button className="text-neutral-300 hover:text-neutral-500" onClick={() => setQ('')}>✕</button>
+              )}
             </div>
-            <p className="text-[10px] text-neutral-400">选中楼盘后，控制地图上对应配套点位的显示</p>
-          </div>
-        </header>
+          </header>
+        )}
 
         {/* 选中楼盘：详情图块态 */}
         {sel && selScore && (
@@ -186,17 +164,26 @@ export default function SidePanel(p: Props) {
               ))}
             </div>
             <div className="mt-2 text-[10px] text-neutral-400">坐标来源：{sel.coord_src}</div>
-            <div className="mt-2 border-t border-neutral-200 pt-2 text-[11px] font-semibold text-neutral-500">
-              其他上榜楼盘
-            </div>
           </section>
         )}
 
-        {/* 总览：榜单卡片 */}
+        {/* 总览：榜单卡片（选中后整栏只显示详情） */}
         {!sel && (
+          <>
           <div className="flex items-center justify-between px-5 pb-1 pt-3">
             <span className="text-xs font-bold text-neutral-700">配套评分榜 · {filtered.length} 盘</span>
-            <div className="flex gap-1">
+            <div className="flex items-center gap-1.5">
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+                className="rounded-full border border-neutral-200 bg-white px-2 py-0.5 text-[10px] text-neutral-600 outline-none"
+                title="排序方式"
+              >
+                <option value="total">综合分排序</option>
+                {DIMS.map((d) => (
+                  <option key={d.key} value={d.key}>{d.label}排序</option>
+                ))}
+              </select>
               {['全部', '住宅', '商业', '写字楼'].map((t) => (
                 <button
                   key={t}
@@ -210,7 +197,6 @@ export default function SidePanel(p: Props) {
               ))}
             </div>
           </div>
-        )}
         <div className="space-y-2 px-4 pb-4 pt-1">
           {filtered.map((l, i) => {
             const sc = p.scores?.get(l.id)
@@ -256,6 +242,8 @@ export default function SidePanel(p: Props) {
             )
           })}
         </div>
+          </>
+        )}
       </div>
       <footer className="border-t border-neutral-200 px-5 py-2 text-[10px] text-neutral-400">
         数据：OpenStreetMap 地理信息 · 安居客在售楼盘公开信息 ｜ 评分为空间统计结果，仅供参考
