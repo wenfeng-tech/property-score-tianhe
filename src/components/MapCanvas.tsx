@@ -46,10 +46,22 @@ function ensureProtocol() {
   if (protocolReady) return
   const p = new Protocol()
   const orig = p.tile.bind(p)
-  maplibregl.addProtocol('pmtiles', ((params: any, ctrl: any) => {
+  maplibregl.addProtocol('pmtiles', (async (params: any, ctrl: any) => {
     const w = window as any
     w.__protoLog = (w.__protoLog || []).concat(params.url).slice(-30)
-    return orig(params, ctrl)
+    const res: any = await orig(params, ctrl)
+    // 底图导出缺陷：z6–z9 瓦片大面积缺失，z10–14 完整。
+    // 把 source 的 minzoom 抬到 10，低缩放视野直接过采样使用 z10 瓦片，白色空洞消失。
+    if (!/\/\d+\/\d+\/\d+$/.test(params.url) && res?.data) {
+      try {
+        const tj = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+        if (tj && typeof tj === 'object' && 'minzoom' in tj) {
+          tj.minzoom = 10
+          return { ...res, data: typeof res.data === 'string' ? JSON.stringify(tj) : tj }
+        }
+      } catch { /* 按原样返回 */ }
+    }
+    return res
   }) as any)
   protocolReady = true
 }
@@ -84,16 +96,45 @@ export default function MapCanvas(props: Props) {
     const style: maplibregl.StyleSpecification = {
       version: 8,
       sources: {
+        // z10–z14：PMTiles 完整瓦片（其上 z6–z9 导出缺失，由 lobase 补齐）
         base: { type: 'vector', url: pmtilesUrl, attribution: '© OpenStreetMap contributors' },
+        // z6–z9：本地 geojson-vt 切好的目录瓦片（同一份 GPKG 全量数据）
+        lobase: {
+          type: 'vector',
+          tiles: ['./tiles/{z}/{x}/{y}.pbf'],
+          minzoom: 6,
+          maxzoom: 9,
+        },
         listings: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#f2f0eb' } },
+        // ---- 低缩放（<10）：目录瓦片 ----
+        {
+          id: 'natural-lo',
+          type: 'fill',
+          source: 'lobase',
+          'source-layer': 'natural',
+          maxzoom: 10,
+          paint: { 'fill-color': naturalColor, 'fill-outline-color': 'rgba(120,120,120,0.25)' },
+        },
+        ...ROAD_DRAW_ORDER.map((cls) => ({
+          id: `road-lo-${cls}`,
+          type: 'line' as const,
+          source: 'lobase',
+          'source-layer': 'roads',
+          maxzoom: 10,
+          filter: ['==', ['get', 'highway'], cls] as any,
+          layout: { 'line-cap': 'round' as const, 'line-join': 'round' as const },
+          paint: { 'line-color': ROAD_STYLES[cls].c, 'line-width': ROAD_STYLES[cls].w },
+        })),
+        // ---- 高缩放（≥10）：PMTiles ----
         {
           id: 'natural',
           type: 'fill',
           source: 'base',
           'source-layer': 'natural',
+          minzoom: 10,
           paint: { 'fill-color': naturalColor, 'fill-outline-color': 'rgba(120,120,120,0.25)' },
         },
         ...ROAD_DRAW_ORDER.map((cls) => ({
@@ -101,6 +142,7 @@ export default function MapCanvas(props: Props) {
           type: 'line' as const,
           source: 'base',
           'source-layer': 'roads',
+          minzoom: 10,
           filter: ['==', ['get', 'highway'], cls] as any,
           layout: { 'line-cap': 'round' as const, 'line-join': 'round' as const },
           paint: { 'line-color': ROAD_STYLES[cls].c, 'line-width': ROAD_STYLES[cls].w },
