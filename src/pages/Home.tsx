@@ -2,34 +2,25 @@ import { useEffect, useMemo, useState } from 'react'
 import MapCanvas from '../components/MapCanvas'
 import SidePanel from '../components/SidePanel'
 import { scoreAll } from '../lib/scoring'
-import type { BaseFeature, Listing, POISet, ListingScore } from '../types'
-
-const FAC_DEFAULT: Record<string, boolean> = { school: true, mall: true, hospital: true, office: true }
+import type { Listing, POISet, ListingScore } from '../types'
 
 export default function Home() {
-  const [base, setBase] = useState<BaseFeature[] | null>(null)
   const [pois, setPois] = useState<POISet | null>(null)
   const [listings, setListings] = useState<Listing[] | null>(null)
-  const [facilities, setFacilities] = useState<BaseFeature[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [hoverId, setHoverId] = useState<number | null>(null)
   const [showAbout, setShowAbout] = useState(false)
-  const [facVis, setFacVis] = useState<Record<string, boolean>>(FAC_DEFAULT)
 
   useEffect(() => {
     Promise.all([
-      fetch('./data/base_landuse.json').then((r) => r.json()),
       fetch('./data/pois.json').then((r) => r.json()),
       fetch('./data/listings.json').then((r) => r.json()),
-      fetch('./data/facilities.json').then((r) => r.json()),
     ])
-      .then(([b, p, l, f]) => {
-        setBase(b)
+      .then(([p, l]) => {
         setPois(p)
         setListings(l)
-        setFacilities(f)
       })
       .catch((e) => setErr(String(e)))
   }, [])
@@ -58,7 +49,7 @@ export default function Home() {
       {/* 主体：竖屏上下对半，横屏左 40% 右 60% */}
       <div className="flex min-h-0 flex-1 flex-col landscape:flex-row">
         <aside className="h-1/2 w-full flex-shrink-0 overflow-hidden border-b border-neutral-200 landscape:h-full landscape:w-[40%] landscape:border-b-0 landscape:border-r">
-          {base && pois && listings ? (
+          {pois && listings ? (
             <SidePanel
               listings={listings}
               scores={scores}
@@ -75,19 +66,14 @@ export default function Home() {
           )}
         </aside>
         <main className="relative min-h-0 flex-1">
-          {base && pois && listings && facilities && (
+          {pois && listings && (
             <MapCanvas
-              base={base}
               listings={listings}
-              pois={pois}
-              facilities={facilities}
+              scores={scores}
               selectedId={selectedId}
               hoverId={hoverId}
-              facVis={facVis}
-              scores={scores}
               onSelect={setSelectedId}
               onHover={setHoverId}
-              onToggleFac={(k) => setFacVis((s) => ({ ...s, [k]: s[k] === false }))}
             />
           )}
         </main>
@@ -106,8 +92,7 @@ export default function Home() {
               0–100 分：基础教育（30%）、轨道交通（25%）、商业购物（20%）、医疗配套（15%）、公园绿地（10%）。
             </p>
             <p className="mt-2">
-              默认视野为广州市政府周边 35 公里，最大范围 50 公里；选中楼盘后自动聚焦其周边 3 公里。
-              地图右侧面板可开关中小学、商场、医院、办公楼四类配套多边形图层（覆盖越秀/天河/海珠/荔湾）。
+              默认视野为以广州市政府为圆心的 35 公里范围，最大范围 50 公里；选中楼盘后自动聚焦其周边 3 公里。
             </p>
             <p className="mt-2 text-neutral-400">
               地理数据来自 OpenStreetMap，楼盘信息来自公开在售信息；评分为空间统计结果，仅供参考，不构成置业建议。
