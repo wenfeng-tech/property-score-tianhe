@@ -37,7 +37,7 @@ const s1 = await page.evaluate(() => {
   const spanKm = (minDim * 156543.03392 * COS) / Math.pow(2, m.getZoom() + 1) / 1000
   return { zoom: m.getZoom(), spanKm, center: m.getCenter().toArray() }
 })
-Math.abs(s1.spanKm - 70) < 6 ? pass('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≈ 70km（35km 半径内切）zoom=${s1.zoom.toFixed(2)}`) : fail('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≠ 70km`)
+Math.abs(s1.spanKm - 70) < 6 ? pass('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≈ 70km（圆心到最近边 35km）zoom=${s1.zoom.toFixed(2)}`) : fail('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≠ 70km`)
 
 // 2) 底图覆盖：东（天河东 113.40）、中（市政府）、西（佛山 113.05）三点都必须有道路/自然要素
 const cov = await page.evaluate(() => {

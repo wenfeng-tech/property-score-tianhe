@@ -29,7 +29,7 @@ const ROAD_DRAW_ORDER = [
   'tertiary', 'secondary', 'primary', 'trunk', 'motorway',
 ]
 
-const HOME_KM = 35 // 默认/回圆心视野：35km 半径圆与窄边内切
+const HOME_KM = 35 // 默认/回圆心视野：广州市政府到地图最近一条边 = 35km（窄边内切圆半径）
 const MAX_KM = 50  // 最大边界：视野不可滑出 50km
 const COS = Math.cos((GZ_GOV.lat * Math.PI) / 180)
 const degLat = (km: number) => km / 110.574
@@ -422,7 +422,7 @@ export default function MapCanvas(props: Props) {
         >−</button>
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-xs shadow-sm hover:bg-neutral-50"
-          title="回到广州市政府 · 35km 视野"
+          title="回到广州市政府 · 默认视野"
           onClick={flyHome}
         >⌖</button>
       </div>
