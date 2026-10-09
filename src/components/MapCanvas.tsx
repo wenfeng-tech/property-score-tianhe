@@ -29,8 +29,8 @@ const ROAD_DRAW_ORDER = [
   'tertiary', 'secondary', 'primary', 'trunk', 'motorway',
 ]
 
-const HOME_KM = 35 // 默认/回圆心视野：广州市政府到地图最近一条边 = 35km（窄边内切圆半径）
-const MAX_KM = 50  // 最大边界：视野不可滑出 50km
+const HOME_KM = 25 // 默认/回圆心视野：广州市政府到地图最近一条边 = 25km（窄边内切圆半径）
+const MAX_KM = 50  // 最大边界：拉远上限为全图可视（最近边 50km），且视野不可滑出 50km
 const COS = Math.cos((GZ_GOV.lat * Math.PI) / 180)
 const degLat = (km: number) => km / 110.574
 const degLon = (km: number) => km / (111.32 * COS)
@@ -227,7 +227,7 @@ export default function MapCanvas(props: Props) {
     // 窄边内切圆 ⇄ 缩放级别
     const minDim = () => Math.min(el.clientWidth, el.clientHeight)
     const zoomForKm = (km: number) => Math.log2((156543.03392 * COS * minDim()) / (km * 2000)) - 1
-    const applyMinZoom = () => map.setMinZoom(zoomForKm(HOME_KM) - 0.02)
+    const applyMinZoom = () => map.setMinZoom(zoomForKm(MAX_KM) - 0.02)
     // 平移钳制：圆心可活动范围 = 50km − 当前窄边可视半径，视野永远罩在 50km 内
     let clamping = false
     const clampCenter = () => {

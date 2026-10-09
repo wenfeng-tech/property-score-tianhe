@@ -37,7 +37,7 @@ const s1 = await page.evaluate(() => {
   const spanKm = (minDim * 156543.03392 * COS) / Math.pow(2, m.getZoom() + 1) / 1000
   return { zoom: m.getZoom(), spanKm, center: m.getCenter().toArray() }
 })
-Math.abs(s1.spanKm - 70) < 6 ? pass('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≈ 70km（圆心到最近边 35km）zoom=${s1.zoom.toFixed(2)}`) : fail('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≠ 70km`)
+Math.abs(s1.spanKm - 50) < 5 ? pass('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≈ 50km（圆心到最近边 25km）zoom=${s1.zoom.toFixed(2)}`) : fail('defaultView', `窄边跨度 ${s1.spanKm.toFixed(1)}km ≠ 50km`)
 
 // 2) 底图覆盖：东（天河东 113.40）、中（市政府）、西（佛山 113.05）三点都必须有道路/自然要素
 const cov = await page.evaluate(() => {
@@ -74,8 +74,8 @@ const s4 = await page.evaluate(() => {
   const probe = (lon, lat) => { const pt = m.project([lon, lat]); return m.queryRenderedFeatures([[pt.x-12,pt.y-12],[pt.x+12,pt.y+12]]).length }
   return { zoom: m.getZoom(), spanKm, center: m.getCenter().toArray(), east: probe(113.45, 23.13), west: probe(112.95, 23.0), south: probe(113.26, 22.75) }
 })
-Math.abs(s4.spanKm - 70) < 8 ? pass('lockZoom35km', `锁死跨度 ${s4.spanKm.toFixed(1)}km ≈ 70km（35km 视野为最远）`) : fail('lockZoom35km', `跨度 ${s4.spanKm.toFixed(1)}km`)
-s4.east > 0 && s4.west > 0 && s4.south > 0 ? pass('lockZoom35km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`) : fail('lockZoom35km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`)
+Math.abs(s4.spanKm - 100) < 10 ? pass('lockZoom50km', `拉远上限跨度 ${s4.spanKm.toFixed(1)}km ≈ 100km（全图可视）`) : fail('lockZoom50km', `跨度 ${s4.spanKm.toFixed(1)}km`)
+s4.east > 0 && s4.west > 0 && s4.south > 0 ? pass('lockZoom50km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`) : fail('lockZoom50km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`)
 // 平移钳制：往东北方向猛拖，圆心应被钳回（距圆心 ≤ 50 − 窄边半径 ≈ 15km）
 await page.evaluate(() => window.__map.jumpTo({ center: [113.259, 23.129], zoom: window.__map.getMinZoom() }))
 for (let i = 0; i < 4; i++) {
@@ -131,7 +131,7 @@ const s7 = await page.evaluate(() => {
   const COS = Math.cos((23.129 * Math.PI) / 180)
   return { spanKm: (minDim * 156543.03392 * COS) / Math.pow(2, m.getZoom() + 1) / 1000, list: document.body.innerText.includes('配套评分榜') }
 })
-s7.list && Math.abs(s7.spanKm - 70) < 8 ? pass('backHome', `返回列表 + ${s7.spanKm.toFixed(1)}km 视野`) : fail('backHome', `list=${s7.list} span=${s7.spanKm.toFixed(1)}`)
+s7.list && Math.abs(s7.spanKm - 50) < 6 ? pass('backHome', `返回列表 + ${s7.spanKm.toFixed(1)}km 视野`) : fail('backHome', `list=${s7.list} span=${s7.spanKm.toFixed(1)}`)
 
 report.consoleErrs = consoleErrs.slice(0, 8)
 console.log(JSON.stringify(report, null, 1))
