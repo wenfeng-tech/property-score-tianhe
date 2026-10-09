@@ -11,6 +11,7 @@ interface Props {
   hoverId: number | null
   onSelect: (id: number | null) => void
   onHover: (id: number | null) => void
+  onShowAbout: () => void
 }
 
 // 楼盘缩略图（加载失败时退化为冷色渐变块+首字）
@@ -245,8 +246,11 @@ export default function SidePanel(p: Props) {
           </>
         )}
       </div>
-      <footer className="border-t border-neutral-200 px-5 py-2 text-[10px] text-neutral-400">
-        数据：OpenStreetMap 地理信息 · 安居客在售楼盘公开信息 ｜ 评分为空间统计结果，仅供参考
+      <footer className="flex items-center justify-between border-t border-neutral-200 px-5 py-2 text-[10px] text-neutral-400">
+        <span>数据：OpenStreetMap 地理信息 · 安居客在售楼盘公开信息 ｜ 评分为空间统计结果，仅供参考</span>
+        <button className="flex-shrink-0 underline-offset-2 hover:text-blue-600 hover:underline" onClick={p.onShowAbout}>
+          评分说明
+        </button>
       </footer>
     </div>
   )
