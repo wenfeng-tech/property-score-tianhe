@@ -82,6 +82,7 @@ export default function MapCanvas(props: Props) {
   const propsRef = useRef(props)
   propsRef.current = props
   const firstSel = useRef(true)
+  const userMovedRef = useRef(false)
 
   // ---------- 初始化地图（一次） ----------
   useEffect(() => {
@@ -209,7 +210,8 @@ export default function MapCanvas(props: Props) {
       style,
       center: [GZ_GOV.lon, GZ_GOV.lat],
       zoom: 10,
-      maxBounds: circleBounds(GZ_GOV.lon, GZ_GOV.lat, MAX_KM + 0.5),
+      // 注意：不能用 maxBounds —— 它会按容器「长边」反推最小缩放，
+      // 在矮宽容器里会把 35km 视野夹成 26km。改为：minZoom 锁 35km 视野 + 手动钳制平移圆心不出 50km。
       maxZoom: 15.5,
       dragRotate: false,
       pitchWithRotate: false,
@@ -225,14 +227,50 @@ export default function MapCanvas(props: Props) {
     // 窄边内切圆 ⇄ 缩放级别
     const minDim = () => Math.min(el.clientWidth, el.clientHeight)
     const zoomForKm = (km: number) => Math.log2((156543.03392 * COS * minDim()) / (km * 2000)) - 1
-    const applyMinZoom = () => map.setMinZoom(zoomForKm(MAX_KM) - 0.05)
+    const applyMinZoom = () => map.setMinZoom(zoomForKm(HOME_KM) - 0.02)
+    // 平移钳制：圆心可活动范围 = 50km − 当前窄边可视半径，视野永远罩在 50km 内
+    let clamping = false
+    const clampCenter = () => {
+      if (clamping) return // setCenter 会再次触发 move，防递归
+      const c = map.getCenter()
+      const halfKm = (metersPerPx(map.getZoom()) * minDim()) / 2 / 1000
+      const allowed = Math.max(0, MAX_KM - halfKm)
+      const dxKm = (c.lng - GZ_GOV.lon) * 111.32 * COS
+      const dyKm = (c.lat - GZ_GOV.lat) * 110.574
+      const d = Math.hypot(dxKm, dyKm)
+      if (d > allowed && d > 0) {
+        clamping = true
+        const s = allowed / d
+        map.setCenter([GZ_GOV.lon + (dxKm * s) / (111.32 * COS), GZ_GOV.lat + (dyKm * s) / 110.574])
+        clamping = false
+      }
+    }
+    map.on('move', clampCenter)
 
     map.on('load', () => {
       applyMinZoom()
-      map.fitBounds(circleBounds(GZ_GOV.lon, GZ_GOV.lat, HOME_KM), { animate: false })
+      map.jumpTo({ center: [GZ_GOV.lon, GZ_GOV.lat], zoom: zoomForKm(HOME_KM) })
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-left')
     })
-    map.on('resize', applyMinZoom)
+    // 容器/画布尺寸稳定后：只要用户未手动操作且未选楼盘，静默重拟合 35km 内切圆
+    const refitHome = () => {
+      if (!userMovedRef.current && propsRef.current.selectedId == null && mapRef.current) {
+        map.jumpTo({ center: [GZ_GOV.lon, GZ_GOV.lat], zoom: zoomForKm(HOME_KM) })
+      }
+    }
+    map.on('resize', () => { applyMinZoom(); refitHome() })
+
+    let lastMinDim = minDim()
+    const onGesture = (e: any) => { if (e?.originalEvent) userMovedRef.current = true }
+    map.on('dragstart', onGesture)
+    map.on('zoomstart', onGesture)
+    const ro = new ResizeObserver(() => {
+      const d = minDim()
+      if (Math.abs(d - lastMinDim) < 32) return
+      lastMinDim = d
+      refitHome()
+    })
+    ro.observe(el)
 
     // 点选 / 悬浮楼盘
     const HIT = ['dots', 'dots-hover', 'dots-sel']
@@ -250,6 +288,7 @@ export default function MapCanvas(props: Props) {
     })
 
     return () => {
+      ro.disconnect()
       map.remove()
       mapRef.current = null
     }
@@ -339,7 +378,7 @@ export default function MapCanvas(props: Props) {
         }
       }
     } else {
-      map.fitBounds(circleBounds(GZ_GOV.lon, GZ_GOV.lat, HOME_KM), { duration: 550 })
+      map.easeTo({ center: [GZ_GOV.lon, GZ_GOV.lat], zoom: zoomForKmOf(map, HOME_KM), duration: 550 })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedId])
@@ -354,7 +393,8 @@ export default function MapCanvas(props: Props) {
 
   const flyHome = () => {
     propsRef.current.onSelect(null)
-    mapRef.current?.fitBounds(circleBounds(GZ_GOV.lon, GZ_GOV.lat, HOME_KM), { duration: 550 })
+    const map = mapRef.current
+    if (map) map.easeTo({ center: [GZ_GOV.lon, GZ_GOV.lat], zoom: zoomForKmOf(map, HOME_KM), duration: 550 })
   }
 
   return (
@@ -374,11 +414,11 @@ export default function MapCanvas(props: Props) {
       <div className="absolute right-3 top-3 z-10 flex flex-col items-stretch gap-1">
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-lg shadow-sm hover:bg-neutral-50"
-          onClick={() => mapRef.current?.zoomIn({ duration: 250 })}
+          onClick={() => { userMovedRef.current = true; mapRef.current?.zoomIn({ duration: 250 }) }}
         >+</button>
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-lg shadow-sm hover:bg-neutral-50"
-          onClick={() => mapRef.current?.zoomOut({ duration: 250 })}
+          onClick={() => { userMovedRef.current = true; mapRef.current?.zoomOut({ duration: 250 }) }}
         >−</button>
         <button
           className="h-8 w-8 rounded border border-neutral-300 bg-white text-xs shadow-sm hover:bg-neutral-50"
@@ -394,3 +434,7 @@ function minDimOf(map: maplibregl.Map) {
   const c = map.getContainer()
   return Math.min(c.clientWidth, c.clientHeight)
 }
+
+// 窄边内切圆 ⇄ 缩放级别（512px 世界，比 256px 方案多 -1）
+const zoomForKmOf = (map: maplibregl.Map, km: number) =>
+  Math.log2((156543.03392 * COS * minDimOf(map)) / (km * 2000)) - 1

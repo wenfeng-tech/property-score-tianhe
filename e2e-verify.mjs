@@ -61,7 +61,8 @@ dotCount >= 35 ? pass('dots', `${dotCount} 个楼盘点`) : fail('dots', `只有
 
 await page.screenshot({ path: SHOT + '-1-default.png' })
 
-// 4) 缩放到 50km 锁：强制 zoomOut 到底，窄边跨度应 ≈100km 且仍全覆盖无空洞
+// 4) 边界锁：minZoom = 35km 视野（窄边跨度≈70km，不能再拉远）；
+//    平移钳制：无论怎么拖，圆心不能使窄边视野滑出 50km 边界
 await page.evaluate(() => window.__map.jumpTo({ zoom: window.__map.getMinZoom() - 1 }))
 await page.waitForTimeout(800)
 const s4 = await page.evaluate(() => {
@@ -73,8 +74,25 @@ const s4 = await page.evaluate(() => {
   const probe = (lon, lat) => { const pt = m.project([lon, lat]); return m.queryRenderedFeatures([[pt.x-12,pt.y-12],[pt.x+12,pt.y+12]]).length }
   return { zoom: m.getZoom(), spanKm, center: m.getCenter().toArray(), east: probe(113.45, 23.13), west: probe(112.95, 23.0), south: probe(113.26, 22.75) }
 })
-Math.abs(s4.spanKm - 100) < 12 ? pass('lock50km', `锁死跨度 ${s4.spanKm.toFixed(1)}km ≈ 100km`) : fail('lock50km', `跨度 ${s4.spanKm.toFixed(1)}km`)
-s4.east > 0 && s4.west > 0 && s4.south > 0 ? pass('lock50km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`) : fail('lock50km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`)
+Math.abs(s4.spanKm - 70) < 8 ? pass('lockZoom35km', `锁死跨度 ${s4.spanKm.toFixed(1)}km ≈ 70km（35km 视野为最远）`) : fail('lockZoom35km', `跨度 ${s4.spanKm.toFixed(1)}km`)
+s4.east > 0 && s4.west > 0 && s4.south > 0 ? pass('lockZoom35km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`) : fail('lockZoom35km覆盖', `东${s4.east} 西${s4.west} 南${s4.south}`)
+// 平移钳制：往东北方向猛拖，圆心应被钳回（距圆心 ≤ 50 − 窄边半径 ≈ 15km）
+await page.evaluate(() => window.__map.jumpTo({ center: [113.259, 23.129], zoom: window.__map.getMinZoom() }))
+for (let i = 0; i < 4; i++) {
+  await page.mouse.move(700, 400)
+  await page.mouse.down()
+  await page.mouse.move(100, 800, { steps: 12 })
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+}
+const s5 = await page.evaluate(() => {
+  const m = window.__map
+  const c = m.getCenter()
+  const COS = Math.cos((23.129 * Math.PI) / 180)
+  const dKm = Math.hypot((c.lng - 113.2591) * 111.32 * COS, (c.lat - 23.1291) * 110.574)
+  return { dKm: +dKm.toFixed(1) }
+})
+s5.dKm <= 16 ? pass('lock50km', `猛拖后圆心偏移 ${s5.dKm}km ≤ 15km（50km 边界钳制）`) : fail('lock50km', `圆心偏移 ${s5.dKm}km 超出钳制`)
 await page.screenshot({ path: SHOT + '-2-50km.png' })
 
 // 5) 跨层切换：zoom 9.5（lo 层 z9）与 zoom 11（pmtiles）都必须有要素
