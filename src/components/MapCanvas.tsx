@@ -89,17 +89,6 @@ export default function MapCanvas(props: Props) {
   const gridRef = useRef(grid)
   gridRef.current = grid
 
-  const districtLabels = useMemo(() => {
-    const out: { n: string; lon: number; lat: number }[] = []
-    for (const b of props.base) {
-      if (b.c === 'boundary' && b.n) {
-        const c = geomCentroid(b.g)
-        if (c) out.push({ n: b.n, lon: c[0], lat: c[1] })
-      }
-    }
-    return out
-  }, [props.base])
-
   // 配套多边形的空间索引 + 图层开关面板状态
   const facGrid = useMemo(() => new GridIndex(props.facilities, (f) => f.g), [props.facilities])
   const facGridRef = useRef(facGrid)
@@ -109,7 +98,7 @@ export default function MapCanvas(props: Props) {
   // ---------- 视野与缩放（虚拟半径公里数 ⇄ 比例尺） ----------
   const virtualR = () => {
     const r = wrapRef.current!.getBoundingClientRect()
-    return Math.min(r.width, r.height) * 0.4
+    return Math.min(r.width, r.height) * 0.5 // 35km 圆 = 窄边内切圆
   }
   const scaleForKm = (km: number) => (virtualR() * 111320) / (km * 1000)
   const kmForScale = (scale: number) => (virtualR() * 111320) / (scale * 1000)
@@ -300,35 +289,50 @@ export default function MapCanvas(props: Props) {
         strokeLines(f, st.c, w, 0.95)
       }
     }
-    // 3. 区界（弱化）
-    for (const f of inView) {
-      if (f.c !== 'boundary') continue
-      pathGeom(f.g)
-      ctx.strokeStyle = 'rgba(90,90,90,0.28)'
-      ctx.lineWidth = 0.8
-      ctx.setLineDash([2, 4])
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
-
-    // 4. 区名标注（底图方位参照）
-    if (pxPerKm < 55) {
-      ctx.textAlign = 'center'
-      for (const d of districtLabels) {
-        const x = X(d.lon, r.width), y = Y(d.lat, r.height)
+    // 3. 名称标注（QML 标注规范：自然地物 rgb(70,70,70) / 道路 rgb(60,60,60)，按缩放门控）
+    ctx.textAlign = 'center'
+    if (pxPerKm > 36) {
+      // 自然地物名称（QML: 9px, minScale 100000）
+      for (const f of inView) {
+        if (!NATURAL_COLORS[f.c] || !f.n) continue
+        const c = geomCentroid(f.g)
+        if (!c) continue
+        const x = X(c[0], r.width), y = Y(c[1], r.height)
         if (x < 0 || x > r.width || y < 0 || y > r.height) continue
-        ctx.font = '600 15px -apple-system, "PingFang SC", sans-serif'
+        ctx.font = '10px -apple-system, "PingFang SC", sans-serif'
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'
+        ctx.lineWidth = 3
+        ctx.strokeText(f.n, x, y)
+        ctx.fillStyle = 'rgb(70,70,70)'
+        ctx.fillText(f.n, x, y)
+      }
+    }
+    if (pxPerKm > 18) {
+      // 道路名称（QML: 8px, minScale 200000；同名去重，取最长线段中点）
+      const seen = new Set<string>()
+      for (const f of inView) {
+        if (!f.n || !(f.c in ROAD_STYLES)) continue
+        if (!['motorway', 'trunk', 'primary', 'secondary'].includes(f.c)) continue
+        if (pxPerKm < (f.c === 'secondary' ? 45 : 18)) continue
+        if (seen.has(f.n)) continue
+        const lines: number[][][] = f.g.type === 'LineString' ? [f.g.coordinates] : f.g.coordinates
+        let best: number[][] | null = null
+        for (const ln of lines) if (!best || ln.length > best.length) best = ln
+        if (!best || best.length < 2) continue
+        const mid = best[Math.floor(best.length / 2)]
+        const x = X(mid[0], r.width), y = Y(mid[1], r.height)
+        if (x < -60 || x > r.width + 60 || y < -20 || y > r.height + 20) continue
+        seen.add(f.n)
+        ctx.font = '10px -apple-system, "PingFang SC", sans-serif'
         ctx.strokeStyle = 'rgba(255,255,255,0.8)'
-        ctx.lineWidth = 4
-        ctx.strokeText(d.n, x, y)
-        ctx.fillStyle = 'rgba(95,95,95,0.65)'
-        ctx.fillText(d.n, x, y)
+        ctx.lineWidth = 3
+        ctx.strokeText(f.n, x, y)
+        ctx.fillStyle = 'rgb(60,60,60)'
+        ctx.fillText(f.n, x, y)
       }
     }
 
-    // 5. 楼盘点位（评分冷色系渐变，白边小圆点 + 柔和投影）+ 名称标签
-    const labelGrid: Record<string, boolean> = {}
-    const showNames = pxPerKm > 12
+    // 5. 楼盘点位（评分冷色系渐变，白边小圆点 + 柔和投影）；名称仅悬浮/点选时显示
     const sorted = [...p.listings].sort(
       (a, b) => (p.scores?.get(a.id)?.total ?? 0) - (p.scores?.get(b.id)?.total ?? 0),
     )
@@ -365,25 +369,22 @@ export default function MapCanvas(props: Props) {
       ctx.strokeStyle = isSel ? '#1d4ed8' : '#ffffff'
       ctx.lineWidth = isSel ? 2.4 : 2.2
       ctx.stroke()
-      if (!isSel && !isHov && !showNames) continue
+      // 名称标签：默认不显示，仅悬浮或点选后显示
+      if (!isSel && !isHov) continue
       const nm = l.name.length > 12 ? l.name.slice(0, 12) + '…' : l.name
-      const fs = isSel || isHov ? 12 : 10.5
+      const fs = 12
       ctx.font = `${isSel ? 'bold ' : ''}${fs}px -apple-system, "PingFang SC", sans-serif`
       const w2 = ctx.measureText(nm).width
-      const k = `${Math.round(x / 110)}_${Math.round(y / 20)}`
-      if (isSel || isHov || !labelGrid[k]) {
-        labelGrid[k] = true
-        const bx = x + 10, by = y - fs + 1
-        ctx.fillStyle = isSel ? 'rgba(37,99,235,0.95)' : 'rgba(255,255,255,0.9)'
-        ctx.strokeStyle = isSel ? '#1d4ed8' : 'rgba(150,150,150,0.6)'
-        ctx.lineWidth = 0.8
-        ctx.beginPath()
-        ctx.rect(bx - 3, by - 1, w2 + 7, fs + 5)
-        ctx.fill()
-        ctx.stroke()
-        ctx.fillStyle = isSel ? '#fff' : '#222'
-        ctx.fillText(nm, bx + 1, by + fs - 1)
-      }
+      const bx = x + 10, by = y - fs + 1
+      ctx.fillStyle = isSel ? 'rgba(37,99,235,0.95)' : 'rgba(255,255,255,0.92)'
+      ctx.strokeStyle = isSel ? '#1d4ed8' : 'rgba(150,150,150,0.6)'
+      ctx.lineWidth = 0.8
+      ctx.beginPath()
+      ctx.rect(bx - 3, by - 1, w2 + 7, fs + 5)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = isSel ? '#fff' : '#222'
+      ctx.fillText(nm, bx + 1, by + fs - 1)
     }
 
     // 9. 比例尺 / 指北针
@@ -557,9 +558,13 @@ export default function MapCanvas(props: Props) {
     flyView(v.cx, v.cy, v.scale * f)
   }
 
-  const avgScore = props.scores
-    ? Math.round([...props.scores.values()].reduce((s, x) => s + x.total, 0) / props.scores.size)
-    : 0
+  // 中位综合分（比平均分更抗极值）
+  const medianScore = (() => {
+    if (!props.scores || props.scores.size === 0) return 0
+    const arr = [...props.scores.values()].map((s) => s.total).sort((a, b) => a - b)
+    const n = arr.length
+    return Math.round(n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2)
+  })()
 
   return (
     <div ref={wrapRef} className="absolute inset-0 bg-[#f2f0eb]">
@@ -569,28 +574,11 @@ export default function MapCanvas(props: Props) {
         className="pointer-events-none absolute z-10 hidden rounded-md border border-neutral-300 bg-white/95 px-2.5 py-1.5 text-xs leading-relaxed shadow-md"
         style={{ maxWidth: 220 }}
       />
-      {/* 图例（右上，缩放控件旁） */}
-      <div className="absolute right-14 top-3 rounded-lg border border-neutral-200 bg-white/92 px-3 py-2 text-[11px] shadow-sm backdrop-blur">
-        <div className="mb-1 font-semibold text-neutral-700">图例</div>
-        <div className="flex items-center gap-1.5 py-0.5 text-neutral-600">
-          <span
-            className="inline-block h-2.5 w-10 rounded-full"
-            style={{ background: 'linear-gradient(90deg,#93c5fd,#1e40af)' }}
-          />
-          楼盘评分 低→高
-        </div>
-        {FAC_LAYERS.map((d) => (
-          <div key={d.key} className="flex items-center gap-1.5 py-0.5 text-neutral-600">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: d.color, opacity: 0.75 }} />
-            {d.label}
-          </div>
-        ))}
-      </div>
       {/* 右下统计卡 */}
       <div className="absolute bottom-3 right-3 rounded-lg border border-neutral-200 bg-white/92 px-3 py-2 text-xs shadow-sm backdrop-blur">
         <span className="font-bold text-neutral-800">{props.listings.length} 个在售新盘</span>
         <span className="mx-1.5 text-neutral-300">|</span>
-        <span className="text-neutral-500">平均综合分 <b className="text-blue-700">{avgScore}</b></span>
+        <span className="text-neutral-500">中位综合分 <b className="text-blue-700">{medianScore}</b></span>
       </div>
       {/* 右侧控制：缩放 + 回圆心（默认 35km 视野） */}
       <div className="absolute right-3 top-3 flex flex-col items-stretch gap-1">
@@ -607,35 +595,37 @@ export default function MapCanvas(props: Props) {
           title="回到广州市政府 · 35km 视野"
           onClick={() => { propsRef.current.onSelect(null); flyView(GZ_GOV.lon, GZ_GOV.lat, scaleForKm(HOME_KM)) }}
         >⌖</button>
-        {/* 图层开关：折叠在 ⌖ 下方 */}
-        <button
-          className={`h-8 w-8 rounded border text-xs shadow-sm ${layersOpen ? 'border-blue-600 bg-blue-600 text-white' : 'border-neutral-300 bg-white hover:bg-neutral-50'}`}
-          title="配套图层"
-          onClick={() => setLayersOpen((o) => !o)}
-        >▤</button>
-        {layersOpen && (
-          <div className="mt-1 w-32 rounded-lg border border-neutral-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
-            <div className="mb-1 text-[11px] font-semibold text-neutral-500">配套图层</div>
-            {FAC_LAYERS.map((L) => {
-              const on = props.facVis[L.key] !== false
-              return (
-                <button
-                  key={L.key}
-                  onClick={() => propsRef.current.onToggleFac(L.key)}
-                  className="flex w-full items-center justify-between py-1 text-neutral-700"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: L.color, opacity: 0.75 }} />
-                    {L.label}
-                  </span>
-                  <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${on ? 'bg-blue-600' : 'bg-neutral-300'}`}>
-                    <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${on ? 'left-3.5' : 'left-0.5'}`} />
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        )}
+        {/* 图层开关：折叠在 ⌖ 下方，面板向左侧展开 */}
+        <div className="relative">
+          <button
+            className={`h-8 w-8 rounded border text-xs shadow-sm ${layersOpen ? 'border-blue-600 bg-blue-600 text-white' : 'border-neutral-300 bg-white hover:bg-neutral-50'}`}
+            title="配套图层"
+            onClick={() => setLayersOpen((o) => !o)}
+          >▤</button>
+          {layersOpen && (
+            <div className="absolute right-full top-0 mr-2 w-32 rounded-lg border border-neutral-200 bg-white/95 p-2.5 text-xs shadow-md backdrop-blur">
+              <div className="mb-1 text-[11px] font-semibold text-neutral-500">配套图层</div>
+              {FAC_LAYERS.map((L) => {
+                const on = props.facVis[L.key] !== false
+                return (
+                  <button
+                    key={L.key}
+                    onClick={() => propsRef.current.onToggleFac(L.key)}
+                    className="flex w-full items-center justify-between py-1 text-neutral-700"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: L.color, opacity: 0.75 }} />
+                      {L.label}
+                    </span>
+                    <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${on ? 'bg-blue-600' : 'bg-neutral-300'}`}>
+                      <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${on ? 'left-3.5' : 'left-0.5'}`} />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

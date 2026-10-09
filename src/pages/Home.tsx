@@ -43,9 +43,8 @@ export default function Home() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
       {/* 顶部导航栏（设计图版式，加宽） */}
       <nav className="flex h-20 flex-shrink-0 items-center justify-between border-b border-neutral-200 px-8">
-        <button className="flex items-baseline gap-2.5" onClick={() => setSelectedId(null)}>
+        <button className="flex items-baseline" onClick={() => setSelectedId(null)}>
           <span className="text-[22px] font-black tracking-tight text-neutral-900">PropertyScore</span>
-          <span className="hidden text-xs text-neutral-400 sm:inline">广州天河 · 在售新盘配套评分</span>
         </button>
         <div className="flex items-center gap-7 text-sm text-neutral-600">
           <button className="font-medium transition-colors hover:text-neutral-900">Buy</button>
@@ -53,9 +52,6 @@ export default function Home() {
           <button className="font-medium transition-colors hover:text-neutral-900">New Developments</button>
           <button className="font-medium transition-colors hover:text-neutral-900">Market Insights</button>
           <button className="font-medium text-neutral-900 transition-colors hover:text-blue-600">Sign in</button>
-          <button className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700">
-            List Property
-          </button>
         </div>
       </nav>
 

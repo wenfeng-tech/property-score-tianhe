@@ -14,13 +14,18 @@ interface Props {
   onShowAbout: () => void
 }
 
-// 楼盘缩略图（加载失败时退化为冷色渐变块+首字）
-function Thumb({ l }: { l: Listing }) {
+// 楼盘缩略图（加载失败时退化为冷色渐变块+首字）；wide 用于两列图块
+function Thumb({ l, wide }: { l: Listing; wide?: boolean }) {
   const [err, setErr] = useState(false)
+  const cls = wide
+    ? 'h-24 w-full rounded-t-lg object-cover'
+    : 'h-14 w-20 flex-shrink-0 rounded-md object-cover'
   if (err || !l.img)
     return (
       <div
-        className="flex h-14 w-20 flex-shrink-0 items-center justify-center rounded-md text-lg font-bold text-white"
+        className={`flex items-center justify-center text-lg font-bold text-white ${
+          wide ? 'h-24 w-full rounded-t-lg' : 'h-14 w-20 flex-shrink-0 rounded-md'
+        }`}
         style={{ background: 'linear-gradient(135deg,#60a5fa,#1e40af)' }}
       >
         {l.name[0]}
@@ -32,7 +37,7 @@ function Thumb({ l }: { l: Listing }) {
       alt={l.name}
       loading="lazy"
       onError={() => setErr(true)}
-      className="h-14 w-20 flex-shrink-0 rounded-md object-cover"
+      className={cls}
       referrerPolicy="no-referrer"
     />
   )
@@ -77,14 +82,10 @@ export default function SidePanel(p: Props) {
   return (
     <div className="flex h-full flex-col bg-white">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {/* 总览头部：标题 + 搜索（选中楼盘后隐藏） */}
+        {/* 总览头部：搜索（选中楼盘后隐藏） */}
         {!sel && (
-          <header className="px-5 pb-3 pt-4">
-            <h2 className="text-lg font-extrabold tracking-tight">天河区 · 新盘配套评分</h2>
-            <p className="mt-0.5 text-[11px] text-neutral-400">
-              在售新盘 {p.listings.length} 个 · 点击楼盘聚焦周边配套
-            </p>
-            <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
+          <header className="px-4 pb-2 pt-4">
+            <div className="flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
               <span className="text-neutral-400">⌕</span>
               <input
                 value={q}
@@ -198,7 +199,7 @@ export default function SidePanel(p: Props) {
               ))}
             </div>
           </div>
-        <div className="space-y-2 px-4 pb-4 pt-1">
+        <div className="grid grid-cols-2 gap-2.5 px-4 pb-4 pt-1">
           {filtered.map((l, i) => {
             const sc = p.scores?.get(l.id)
             const active = l.id === p.selectedId
@@ -208,20 +209,30 @@ export default function SidePanel(p: Props) {
                 onClick={() => p.onSelect(active ? null : l.id)}
                 onMouseEnter={() => p.onHover(l.id)}
                 onMouseLeave={() => p.onHover(null)}
-                className={`flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${
+                className={`flex flex-col overflow-hidden rounded-xl border text-left transition-all ${
                   active
                     ? 'border-blue-400 bg-blue-50/60 shadow-sm'
-                    : 'border-neutral-200 bg-white hover:border-neutral-300 hover:shadow-sm'
+                    : 'border-neutral-200 bg-white hover:border-neutral-300 hover:shadow-md'
                 }`}
               >
-                <span className="w-4 flex-shrink-0 text-center text-[10px] text-neutral-400">{i + 1}</span>
-                <Thumb l={l} />
-                <span className="min-w-0 flex-1">
+                <span className="relative block">
+                  <Thumb l={l} wide />
+                  <span className="absolute left-1.5 top-1.5 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {i + 1}
+                  </span>
+                  {sc && (
+                    <span className="absolute bottom-1.5 right-1.5 rounded-md bg-white/95 px-1.5 py-0.5 text-sm font-black leading-none text-neutral-900 shadow-sm">
+                      {sc.total}
+                      <span className="ml-0.5 text-[9px] font-normal text-neutral-400">分</span>
+                    </span>
+                  )}
+                </span>
+                <span className="block px-2.5 pb-2 pt-1.5">
                   <span className="block truncate text-[13px] font-semibold">{l.name}</span>
                   <span className="mt-0.5 block truncate text-[10px] text-neutral-400">
                     {l.area} · {l.size || l.layout || l.type}
                   </span>
-                  <span className="mt-1 flex gap-1">
+                  <span className="mt-1 flex flex-wrap gap-1">
                     {topDims(l.id).map((d) => (
                       <span
                         key={d.key}
@@ -233,12 +244,6 @@ export default function SidePanel(p: Props) {
                     ))}
                   </span>
                 </span>
-                {sc && (
-                  <span className="flex-shrink-0 text-center">
-                    <span className="block text-xl font-black leading-none text-neutral-900">{sc.total}</span>
-                    <span className="mt-0.5 block text-[9px] text-neutral-400">综合分</span>
-                  </span>
-                )}
               </button>
             )
           })}
