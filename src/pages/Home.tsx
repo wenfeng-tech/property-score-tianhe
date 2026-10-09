@@ -12,8 +12,6 @@ export default function Home() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [hoverId, setHoverId] = useState<number | null>(null)
-  const [presetKm, setPresetKm] = useState(15)
-  const [currentKm, setCurrentKm] = useState(15)
   const [showAbout, setShowAbout] = useState(false)
   const [dimVis, setDimVis] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(DIMS.map((d) => [d.key, true])),
@@ -64,7 +62,6 @@ export default function Home() {
               scores={scores}
               selectedId={selectedId}
               hoverId={hoverId}
-              currentKm={currentKm}
               dimVis={dimVis}
               onSelect={setSelectedId}
               onHover={setHoverId}
@@ -84,14 +81,10 @@ export default function Home() {
               pois={pois}
               selectedId={selectedId}
               hoverId={hoverId}
-              presetKm={presetKm}
-              currentKm={currentKm}
               dimVis={dimVis}
               scores={scores}
               onSelect={setSelectedId}
               onHover={setHoverId}
-              onPreset={setPresetKm}
-              onKmChange={setCurrentKm}
             />
           )}
         </main>
@@ -110,8 +103,8 @@ export default function Home() {
               0–100 分：基础教育（30%）、轨道交通（25%）、商业购物（20%）、医疗配套（15%）、公园绿地（10%）。
             </p>
             <p className="mt-2">
-              地图上红色虚线圈为视野范围圈（可选 5 / 15 / 35 / 50 公里），圈外内容淡化显示；
-              选中楼盘后显示其 1km / 3km / 5km 配套圈层与周边资源点位。
+              默认视野为广州市政府周边 35 公里，最大范围 50 公里；选中楼盘后自动聚焦其周边 5 公里，
+              并在地图上显示该盘附近的配套资源点位。
             </p>
             <p className="mt-2 text-neutral-400">
               地理数据来自 OpenStreetMap，楼盘信息来自公开在售信息；评分为空间统计结果，仅供参考，不构成置业建议。

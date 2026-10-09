@@ -9,7 +9,6 @@ interface Props {
   scores: Map<number, ListingScore> | null
   selectedId: number | null
   hoverId: number | null
-  currentKm: number
   dimVis: Record<string, boolean>
   onSelect: (id: number | null) => void
   onHover: (id: number | null) => void
@@ -76,7 +75,7 @@ export default function SidePanel(p: Props) {
         <header className="px-5 pb-3 pt-4">
           <h2 className="text-lg font-extrabold tracking-tight">天河区 · 新盘配套评分</h2>
           <p className="mt-0.5 text-[11px] text-neutral-400">
-            在售新盘 {p.listings.length} 个 · 点击楼盘聚焦其 5 公里配套圈
+            在售新盘 {p.listings.length} 个 · 点击楼盘聚焦周边配套
           </p>
           <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 focus-within:border-blue-500">
             <span className="text-neutral-400">⌕</span>
